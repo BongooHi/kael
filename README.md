@@ -23,6 +23,11 @@
 
 **Kael** is an always-listening, low-latency AI voice assistant built for modern Linux desktops. It pairs **offline local wake-word detection (Vosk)** with **Google's Gemini 3.8 Live API**, **native PipeWire/PulseAudio async streams**, a hardware-accelerated **OpenGL screen-edge glow HUD** with live dual captions & floating image cards, **24 safe desktop automation tools**, and a cross-desktop **Qt6 QML Settings & Onboarding App**.
 
+## Note
+
+> [!NOTE]
+> This project is completely made by AI, only maintained by a human so this project is expected to get frequently updates and Kael will forever be free.
+
 ---
 
 ## ✨ Features
