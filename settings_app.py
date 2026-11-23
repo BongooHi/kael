@@ -149,6 +149,7 @@ class KaelSettingsBackend(QObject):
         self._hud_running = False
         self._autostart_enabled = False
         self._memories: list[str] = load_memories()
+        self._memories_mtime: float = self._read_memories_mtime()
 
         self._api_testing = False
         self._api_test_ok = False
@@ -413,6 +414,12 @@ class KaelSettingsBackend(QObject):
 
     # ---------- Slots called from QML ----------
 
+    def _read_memories_mtime(self) -> float:
+        try:
+            return MEMORY_FILE.stat().st_mtime if MEMORY_FILE.exists() else 0.0
+        except OSError:
+            return 0.0
+
     @pyqtSlot()
     def refreshStatus(self) -> None:
         def _worker() -> None:
@@ -431,6 +438,13 @@ class KaelSettingsBackend(QObject):
                 self._hud_running = new_h
                 self._autostart_enabled = new_e
                 self.statusChanged.emit()
+
+            # Keep Memory tab synced live when Kael adds/removes memories via voice
+            mtime = self._read_memories_mtime()
+            if mtime != self._memories_mtime:
+                self._memories_mtime = mtime
+                self._memories = load_memories()
+                self.memoriesChanged.emit()
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -514,6 +528,13 @@ class KaelSettingsBackend(QObject):
         self.configChanged.emit()
         _send_hud_packet({"reload_config": True})
         self.toastEmitted.emit("Restored default settings (API key preserved).", False)
+
+    @pyqtSlot()
+    def clearApiTest(self) -> None:
+        if self._api_test_msg:
+            self._api_test_msg = ""
+            self._api_test_ok = False
+            self.apiTestChanged.emit()
 
     @pyqtSlot(str)
     def testApiKey(self, key: str) -> None:
@@ -707,11 +728,12 @@ class KaelSettingsBackend(QObject):
                             pass
                         proc.wait(timeout=8.0)
 
-                    # Cache audio so future previews of this voice are 100% instant!
-                    if collected and my_gen == self._preview_gen:
+                    # Cache audio only when complete & non-trivial so broken samples are never cached
+                    pcm_all = b"".join(collected)
+                    if len(pcm_all) > 8000 and my_gen == self._preview_gen:
                         try:
                             VOICE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                            cache_file.write_bytes(b"".join(collected))
+                            cache_file.write_bytes(pcm_all)
                         except OSError:
                             pass
 
@@ -751,24 +773,21 @@ class KaelSettingsBackend(QObject):
         show_captions: bool,
         caption_scale: float,
     ) -> None:
-        """Apply appearance settings and trigger a 3.5s live screen glow preview."""
-        self._cfg = save_config(
-            {
-                "hud_theme": theme_id,
-                "hud_glow_intensity": intensity,
-                "hud_glow_speed": speed,
-                "hud_show_captions": show_captions,
-                "hud_caption_scale": caption_scale,
-            }
-        )
-        self.configChanged.emit()
+        """Non-destructive 3.5s live screen glow preview (never overwrites unsaved settings!)."""
+        preview_cfg = {
+            "hud_theme": theme_id,
+            "hud_glow_intensity": intensity,
+            "hud_glow_speed": speed,
+            "hud_show_captions": show_captions,
+            "hud_caption_scale": caption_scale,
+        }
 
         if not Path(HUD_SOCK_PATH).exists():
             _run_quick(["systemctl", "--user", "start", "kael-hud.service"], timeout=4.0)
             time.sleep(0.5)
 
         def _animate() -> None:
-            _send_hud_packet({"reload_config": True})
+            _send_hud_packet({"preview_config": preview_cfg})
             _send_hud_packet(
                 {
                     "state": "listening",
@@ -787,6 +806,9 @@ class KaelSettingsBackend(QObject):
                 )
                 time.sleep(0.35)
             _send_hud_packet({"state": "standby", "level": 0.0, "subtitle": ""})
+            time.sleep(0.5)
+            # Restore saved config on HUD so unsaved preview tweaks don't linger unless saved
+            _send_hud_packet({"reload_config": True})
 
         threading.Thread(target=_animate, daemon=True).start()
 

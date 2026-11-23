@@ -12,6 +12,11 @@ import asyncio
 import json
 import os
 import signal
+
+# Ignore USR1/USR2 immediately (before heavy imports) so early hotkeys never kill startup
+signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+signal.signal(signal.SIGUSR2, signal.SIG_IGN)
+
 import socket
 import subprocess
 import sys
@@ -184,6 +189,7 @@ class KaelDaemon:
         cfg: dict[str, Any] | None = None,
     ) -> None:
         self._cfg = cfg if cfg is not None else load_config()
+        self._api_key = api_key
         self.client = genai.Client(
             api_key=api_key,
             http_options={"api_version": "v1beta"},
@@ -224,8 +230,15 @@ class KaelDaemon:
         self.stop_event = asyncio.Event()
 
     def _build_live_config(self) -> types.LiveConnectConfig:
-        # Reload config on every wake-up so persona/voice/slider tweaks apply immediately
+        # Reload config & API key on every wake-up so persona/voice/slider tweaks apply immediately
         self._cfg = load_config()
+        latest_key = get_api_key()
+        if latest_key and latest_key != self._api_key:
+            self._api_key = latest_key
+            self.client = genai.Client(
+                api_key=latest_key,
+                http_options={"api_version": "v1beta"},
+            )
         self.voice = str(self._cfg.get("voice", self.voice))
         self.voice_fx = float(self._cfg.get("voice_fx", self.voice_fx))
         self.idle_timeout = float(self._cfg.get("idle_timeout", self.idle_timeout))
@@ -265,6 +278,9 @@ class KaelDaemon:
         self.hotkey_trigger.clear()
         self.dismiss_trigger.clear()
         self.hud.send(state="listening", label="Listening", subtitle="", level=0.3)
+
+        # Reload live config BEFORE initializing player so Voice FX / voice tweaks apply immediately
+        config = self._build_live_config()
 
         # Play wake chime concurrently while establishing the Gemini Live WebSocket
         chime_task = asyncio.create_task(
@@ -314,9 +330,19 @@ class KaelDaemon:
             print(f"\n[Timer] Time's up: {label}")
             self.audio_io.play_pcm_background(TIMER_CHIME, stream_name="TimerChime")
 
-        config = self._build_live_config()
+        def _format_user_error(exc: Exception) -> str:
+            msg = str(exc)
+            low = msg.lower()
+            if "1011" in msg or "quota" in low or "429" in msg:
+                return "Gemini rate limit hit — try again in a few seconds."
+            if "503" in msg or "unavailable" in low:
+                return "Gemini Live is momentarily busy (503) — try again."
+            if "api_key_invalid" in low or "401" in msg or "403" in msg:
+                return "Invalid Gemini API key — open Kael Settings to check it."
+            return msg[:120]
 
-        try:
+        async def _connect_and_interact() -> None:
+            nonlocal mic_stream, dismissed_by_user, spoke_this_turn, active_tool_calls
             async with self.client.aio.live.connect(
                 model=MODEL_NAME, config=config
             ) as session:
@@ -575,10 +601,28 @@ class KaelDaemon:
                     if not task.cancelled() and task.exception():
                         raise task.exception()
 
+        try:
+            for attempt in range(2):
+                try:
+                    await _connect_and_interact()
+                    break
+                except Exception as exc:
+                    err_s = str(exc)
+                    transient = any(tok in err_s for tok in ("503", "UNAVAILABLE", "1011"))
+                    if (
+                        attempt == 0
+                        and transient
+                        and mic_stream is None
+                        and not self.dismiss_trigger.is_set()
+                        and not self.stop_event.is_set()
+                    ):
+                        await asyncio.sleep(0.7)
+                        continue
+                    raise
         except Exception as exc:
             if not self.stop_event.is_set():
                 print(f"\n[Kael] Session error: {exc}", file=sys.stderr)
-                _notify("Kael Error", str(exc)[:120])
+                _notify("Kael", _format_user_error(exc))
         finally:
             if not chime_task.done():
                 chime_task.cancel()
@@ -694,6 +738,10 @@ def main() -> None:
         cfg=cfg,
     )
     asyncio.run(daemon.run())
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # Exit cleanly without letting orphaned worker-pool HTTP threads stall systemd shutdown
+    os._exit(0)
 
 
 if __name__ == "__main__":

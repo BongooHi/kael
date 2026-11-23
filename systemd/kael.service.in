@@ -10,6 +10,7 @@ WorkingDirectory=@@INSTALL_DIR@@
 ExecStart=@@INSTALL_DIR@@/.venv/bin/python @@INSTALL_DIR@@/kael.py
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=5
 
 [Install]
 WantedBy=graphical-session.target

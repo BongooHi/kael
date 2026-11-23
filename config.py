@@ -18,7 +18,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 # App metadata (shown in Kael Settings -> About)
 APP_NAME = "Kael"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_AUTHOR = "Gemini"
 APP_MAINTAINER = "BongooHi"
 APP_LICENSE = "MIT License"
@@ -238,7 +238,7 @@ def default_config() -> dict[str, Any]:
         "voice": "Schedar",
         "voice_fx": 0.0,
         "persona_preset": "snarky",
-        "languages": "English and Vietnamese",
+        "languages": "English",
         "allow_swearing": True,
         "comply_roleplay": True,
         "custom_instructions": "",
@@ -346,20 +346,32 @@ def load_config() -> dict[str, Any]:
         except Exception:
             pass
 
-    # Clamp / sanitize critical fields
+    # Clamp / sanitize critical fields safely even if config.json has bad types
+    def _safe_float(val: Any, default: float, lo: float, hi: float) -> float:
+        try:
+            return max(lo, min(hi, float(val)))
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_int(val: Any, default: int, lo: int, hi: int) -> int:
+        try:
+            return max(lo, min(hi, int(float(val))))
+        except (TypeError, ValueError):
+            return default
+
     if cfg["hud_theme"] not in HUD_THEMES:
         cfg["hud_theme"] = "apple_rainbow"
     if cfg["persona_preset"] not in PERSONA_PRESETS:
         cfg["persona_preset"] = "snarky"
-    cfg["hud_glow_intensity"] = max(0.4, min(1.8, float(cfg["hud_glow_intensity"])))
-    cfg["hud_glow_speed"] = max(0.4, min(2.2, float(cfg["hud_glow_speed"])))
-    cfg["hud_caption_scale"] = max(0.8, min(1.4, float(cfg["hud_caption_scale"])))
-    cfg["hud_image_duration"] = max(5, min(30, int(cfg["hud_image_duration"])))
-    cfg["voice_fx"] = max(0.0, min(1.0, float(cfg["voice_fx"])))
-    cfg["wake_confidence"] = max(0.25, min(0.95, float(cfg["wake_confidence"])))
-    cfg["wake_min_rms"] = max(40, min(1200, int(cfg["wake_min_rms"])))
-    cfg["idle_timeout"] = max(8, min(120, int(cfg["idle_timeout"])))
-    cfg["barge_in_threshold"] = max(0.12, min(0.75, float(cfg["barge_in_threshold"])))
+    cfg["hud_glow_intensity"] = _safe_float(cfg.get("hud_glow_intensity"), 1.0, 0.4, 1.8)
+    cfg["hud_glow_speed"] = _safe_float(cfg.get("hud_glow_speed"), 1.0, 0.4, 2.2)
+    cfg["hud_caption_scale"] = _safe_float(cfg.get("hud_caption_scale"), 1.0, 0.8, 1.4)
+    cfg["hud_image_duration"] = _safe_int(cfg.get("hud_image_duration"), 14, 5, 30)
+    cfg["voice_fx"] = _safe_float(cfg.get("voice_fx"), 0.0, 0.0, 1.0)
+    cfg["wake_confidence"] = _safe_float(cfg.get("wake_confidence"), 0.70, 0.25, 0.95)
+    cfg["wake_min_rms"] = _safe_int(cfg.get("wake_min_rms"), 220, 40, 1200)
+    cfg["idle_timeout"] = _safe_int(cfg.get("idle_timeout"), 18, 8, 120)
+    cfg["barge_in_threshold"] = _safe_float(cfg.get("barge_in_threshold"), 0.32, 0.12, 0.75)
     return cfg
 
 
@@ -425,9 +437,20 @@ def build_system_prompt(cfg: dict[str, Any], memories: list[str] | None = None) 
     if preset_id == "custom" and custom_instr:
         persona_block = custom_instr
     else:
+        if languages.lower() == "automatic":
+            lang_line = (
+                "- Language: Automatically detect whatever language the user speaks and "
+                "reply naturally in that same language."
+            )
+        else:
+            lang_line = (
+                f"- Language: The user ONLY speaks {languages} — NEVER reply in Spanish, Portuguese, "
+                "French, or any other language even if background noise or audio transcription looks like "
+                f"another language. Always reply in English unless they clearly speak another of their configured languages ({languages})."
+            )
         lines = [
             f"- Your name is {name} (version {APP_VERSION}).",
-            f"- Language: The user speaks {languages}. Understand them fluently and match the language they speak (default to the primary language unless they switch).",
+            lang_line,
             f"- If asked what model or tech you're running on, you can casually mention you're {name} {APP_VERSION}, powered by Google's Gemini 3.8 Live API with local offline Vosk wake-word detection on Linux.",
             f"- {preset['tone']}",
         ]

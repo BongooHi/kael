@@ -367,8 +367,10 @@ class KaelHUDApp(Gtk.Application):
         self._hide_pending_idle: bool = False
         self._image_hide_timer_id: int | None = None
 
-    def _reload_appearance_config(self) -> None:
+    def _reload_appearance_config(self, override: dict[str, object] | None = None) -> None:
         cfg = load_config()
+        if isinstance(override, dict):
+            cfg.update(override)
         theme = get_hud_theme(cfg)
         self.glow_intensity = float(cfg.get("hud_glow_intensity", 1.0))
         self.glow_speed = float(cfg.get("hud_glow_speed", 1.0))
@@ -457,12 +459,16 @@ class KaelHUDApp(Gtk.Application):
         return False
 
     def _show_window(self) -> None:
-        if self.glow_win and not self.glow_win.get_visible():
+        was_hidden = bool(self.glow_win and not self.glow_win.get_visible())
+        if was_hidden and self.glow_win is not None:
             self.glow_win.set_visible(True)
-        # Defer attaching tick callback to idle so GdkFrameClock finishes surface map cleanly
+        # Wait briefly after map before attaching tick callback so GdkFrameClock finishes its first frame cleanly
         if self._tick_id is None and not self._tick_pending_idle:
             self._tick_pending_idle = True
-            GLib.idle_add(self._start_tick_idle)
+            if was_hidden:
+                GLib.timeout_add(35, self._start_tick_idle)
+            else:
+                GLib.idle_add(self._start_tick_idle)
 
     def _start_tick_idle(self) -> bool:
         self._tick_pending_idle = False
@@ -578,6 +584,8 @@ class KaelHUDApp(Gtk.Application):
 
             if msg.get("reload_config"):
                 self._reload_appearance_config()
+            elif isinstance(msg.get("preview_config"), dict):
+                self._reload_appearance_config(override=msg["preview_config"])
 
             if "pid" in msg:
                 self.kael_pid = int(msg["pid"])

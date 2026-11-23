@@ -24,6 +24,7 @@ from google.genai import types
 NOTES_DIR = Path.home() / "KaelNotes"
 MEMORY_FILE = NOTES_DIR / "kael_memory.json"
 _VISION_CLIENT: Any = None
+_VISION_API_KEY: str = ""
 _ACTIVE_TIMERS: set[asyncio.Task[Any]] = set()
 
 
@@ -271,7 +272,7 @@ def _scan_desktop_apps() -> list[dict[str, str]]:
                 entry = cp["Desktop Entry"]
                 if entry.get("Type", "") != "Application":
                     continue
-                if entry.get("NoDisplay", "").lower() == "true":
+                if entry.get("NoDisplay", "").lower() == "true" or entry.get("Hidden", "").lower() == "true":
                     continue
                 name = entry.get("Name", "").strip()
                 exec_cmd = entry.get("Exec", "").strip()
@@ -585,7 +586,9 @@ def _find_or_read_files(action: str, query: str) -> dict[str, Any]:
                 return {"ok": False, "error": "Access to sensitive files is blocked."}
             if not resolved.is_file():
                 return {"ok": False, "error": f"File not found: {query}"}
-            return {"ok": True, "path": str(resolved), "content": resolved.read_text(errors="replace")[:4000]}
+            with resolved.open("r", encoding="utf-8", errors="replace") as f:
+                content = f.read(4000)
+            return {"ok": True, "path": str(resolved), "content": content}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     return {"ok": False, "error": f"Unsupported file action: {action}"}
@@ -744,56 +747,63 @@ def _capture_screen_jpeg() -> bytes | None:
 
 
 def _get_vision_client(api_key: str) -> Any:
-    global _VISION_CLIENT
-    if _VISION_CLIENT is None:
+    global _VISION_CLIENT, _VISION_API_KEY
+    if _VISION_CLIENT is None or _VISION_API_KEY != api_key:
         from google import genai
 
-        _VISION_CLIENT = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
+        _VISION_CLIENT = genai.Client(
+            api_key=api_key,
+            http_options={"api_version": "v1beta", "timeout": 12000},
+        )
+        _VISION_API_KEY = api_key
     return _VISION_CLIENT
 
 
 def _analyze_screen(question: str = "") -> dict[str, Any]:
-    """Capture the Hyprland screen and analyze it accurately with Gemini vision + fallback."""
+    """Capture the current desktop screen and analyze it accurately with Gemini vision + fallback."""
     jpg = _capture_screen_jpeg()
     if not jpg:
         return {"ok": False, "error": "Failed to capture screen."}
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    from config import get_api_key
+
+    api_key = get_api_key()
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY is not set."}
 
-    # Grab true active workspace ID + focused window + visible windows on THIS workspace only
+    # Grab true active workspace ID + focused window + visible windows on THIS workspace only (Hyprland)
     active_title = ""
     visible_windows: list[str] = []
     active_ws = None
 
-    code, out = _run(["hyprctl", "activeworkspace", "-j"])
-    if code == 0 and out:
-        try:
-            active_ws = json.loads(out).get("id")
-        except Exception:
-            pass
+    if shutil.which("hyprctl") and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        code, out = _run(["hyprctl", "activeworkspace", "-j"])
+        if code == 0 and out:
+            try:
+                active_ws = json.loads(out).get("id")
+            except Exception:
+                pass
 
-    code, out = _run(["hyprctl", "activewindow", "-j"])
-    if code == 0 and out:
-        try:
-            aw = json.loads(out)
-            active_title = f"{aw.get('class', '')}: {aw.get('title', '')}".strip(": ")
-            if active_ws is None:
-                active_ws = aw.get("workspace", {}).get("id")
-        except Exception:
-            pass
+        code, out = _run(["hyprctl", "activewindow", "-j"])
+        if code == 0 and out:
+            try:
+                aw = json.loads(out)
+                active_title = f"{aw.get('class', '')}: {aw.get('title', '')}".strip(": ")
+                if active_ws is None:
+                    active_ws = aw.get("workspace", {}).get("id")
+            except Exception:
+                pass
 
-    code, out = _run(["hyprctl", "clients", "-j"])
-    if code == 0 and out:
-        try:
-            for c in json.loads(out):
-                if active_ws is None or c.get("workspace", {}).get("id") == active_ws:
-                    cls = c.get("class", "")
-                    ttl = c.get("title", "")
-                    visible_windows.append(f"{cls} ({ttl})" if ttl else cls)
-        except Exception:
-            pass
+        code, out = _run(["hyprctl", "clients", "-j"])
+        if code == 0 and out:
+            try:
+                for c in json.loads(out):
+                    if active_ws is None or c.get("workspace", {}).get("id") == active_ws:
+                        cls = c.get("class", "")
+                        ttl = c.get("title", "")
+                        visible_windows.append(f"{cls} ({ttl})" if ttl else cls)
+            except Exception:
+                pass
 
     win_hint = (
         f" Known open windows on this workspace: {', '.join(visible_windows)}."
@@ -801,17 +811,17 @@ def _analyze_screen(question: str = "") -> dict[str, Any]:
         else ""
     )
     prompt = (
-        f"Answer this specifically based on the screenshot:{win_hint} Question: {question}"
+        f"Answer this specifically and accurately based on the screenshot (including apps, windows, text, AND any screen-edge glow borders, colored lighting effects, overlays, or captions):{win_hint} Question: {question}"
         if question.strip()
-        else f"Describe specifically and accurately what apps, windows, tabs, images, or text are visible on this Linux desktop screen (3-4 concise sentences).{win_hint}"
+        else f"Describe specifically and accurately what is visible on this Linux desktop screen — including apps, windows, tabs, text, images, AND any screen-edge glow borders, colored lighting effects, floating overlays, or captions around the edges (3-4 concise sentences).{win_hint}"
     )
 
     client = _get_vision_client(api_key)
     img_part = types.Part.from_bytes(data=jpg, mime_type="image/jpeg")
     # Multi-model fallback across flash-lite / flash pools so 503 traffic spikes recover automatically
     attempts = [
-        ("gemini-3.1-flash-lite", 0.0),
-        ("gemini-3.5-flash-lite", 0.25),
+        ("gemini-3.5-flash-lite", 0.0),
+        ("gemini-3.1-flash-lite", 0.2),
         ("gemini-3.8-flash", 0.3),
         ("gemini-3.6-flash", 0.3),
     ]
@@ -960,15 +970,18 @@ def _get_weather(location: str = "") -> dict[str, Any]:
         resp = requests.get(
             f"https://wttr.in/{loc}?format=j1",
             headers={"User-Agent": "Kael/1.0"},
-            timeout=6.0,
+            timeout=8.0,
         )
         resp.raise_for_status()
         data = resp.json()
-        cur = data["current_condition"][0]
-        area = data.get("nearest_area", [{}])[0]
-        city = area.get("areaName", [{}])[0].get("value", location or "your area")
-        country = area.get("country", [{}])[0].get("value", "")
-        desc = cur.get("weatherDesc", [{}])[0].get("value", "unknown")
+        conds = data.get("current_condition") or []
+        if not conds:
+            return {"ok": False, "error": "Weather provider returned empty data."}
+        cur = conds[0]
+        area = (data.get("nearest_area") or [{}])[0]
+        city = (area.get("areaName") or [{}])[0].get("value", location or "your area")
+        country = (area.get("country") or [{}])[0].get("value", "")
+        desc = (cur.get("weatherDesc") or [{}])[0].get("value", "unknown")
         return {
             "ok": True,
             "location": f"{city}, {country}".strip(", "),
@@ -1047,9 +1060,7 @@ def _web_search(query: str, max_results: int = 4) -> dict[str, Any]:
         text = resp.text
 
         titles = re.findall(r'class="result__a"[^>]*>(.*?)</a>', text, re.S)
-        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', text, re.S)
-        if not snippets:
-            snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</span>', text, re.S)
+        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</(?:a|span|div)>', text, re.S)
 
         def _clean(raw: str) -> str:
             return html.unescape(re.sub(r"<[^>]+>", "", raw)).strip()
@@ -1062,6 +1073,31 @@ def _web_search(query: str, max_results: int = 4) -> dict[str, Any]:
                     "snippet": _clean(snippets[i]) if i < len(snippets) else "",
                 }
             )
+        if not results:
+            # Fallback to DuckDuckGo Instant Answer JSON API
+            try:
+                ia = requests.get(
+                    "https://api.duckduckgo.com/",
+                    params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+                    headers={"User-Agent": "Kael/1.0"},
+                    timeout=5.0,
+                )
+                if ia.ok:
+                    jd = ia.json()
+                    if jd.get("AbstractText"):
+                        results.append(
+                            {
+                                "title": jd.get("Heading") or query,
+                                "snippet": jd["AbstractText"][:600],
+                            }
+                        )
+                    for topic in (jd.get("RelatedTopics") or [])[:max_results]:
+                        if isinstance(topic, dict) and topic.get("Text"):
+                            results.append({"title": query, "snippet": topic["Text"][:300]})
+                            if len(results) >= max_results:
+                                break
+            except Exception:
+                pass
         if not results:
             return {"ok": True, "query": query, "results": [], "note": "No web results found."}
         return {"ok": True, "query": query, "results": results}
@@ -1089,7 +1125,9 @@ def _manage_notes(action: str, filename: str = "quick_notes.md", content: str = 
     if action == "read":
         if not target.exists():
             return {"ok": False, "error": f"Note '{safe_name}' does not exist."}
-        return {"ok": True, "filename": safe_name, "content": target.read_text()[:4000]}
+        with target.open("r", encoding="utf-8", errors="replace") as f:
+            content = f.read(4000)
+        return {"ok": True, "filename": safe_name, "content": content}
     if action == "append":
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         with target.open("a", encoding="utf-8") as f:
@@ -1145,14 +1183,14 @@ TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
     ),
     types.FunctionDeclaration(
         name="see_screen",
-        description="Look at what is currently on the user's screen right now and return an accurate description of all visible windows, apps, text, or images.",
+        description="Look at what is currently on the user's screen right now and return an accurate description of all visible windows, apps, text, images, edge-glow effects, overlays, and colors.",
         behavior="NON_BLOCKING",
         parameters={
             "type": "OBJECT",
             "properties": {
                 "question": {
                     "type": "STRING",
-                    "description": "Optional specific question about what's on the screen (e.g. 'read the error message').",
+                    "description": "Always pass the user's specific question about the screen here when they ask about something specific (e.g. 'is there a glow around the edges and what colors?', 'read the error message').",
                 },
             },
         },

@@ -73,6 +73,65 @@ ApplicationWindow {
         setDraft("custom_instructions", combined);
     }
 
+    function isAutoLanguage() {
+        return String(getDraft("languages", "English") || "").trim().toLowerCase() === "automatic";
+    }
+
+    function parseLanguageList() {
+        let raw = String(getDraft("languages", "English") || "").trim();
+        if (!raw || raw.toLowerCase() === "automatic") return [];
+        let parts = raw.split(/\s*(?:,|&|\band\b)\s*/i);
+        let out = [];
+        for (let i = 0; i < parts.length; i++) {
+            let p = parts[i].trim();
+            if (p && p.toLowerCase() !== "automatic" && out.indexOf(p) === -1) out.push(p);
+        }
+        return out;
+    }
+
+    function hasLanguage(langName) {
+        let lower = langName.toLowerCase();
+        if (lower === "automatic") return isAutoLanguage();
+        if (isAutoLanguage()) return false;
+        let list = parseLanguageList();
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].toLowerCase() === lower) return true;
+        }
+        return false;
+    }
+
+    function toggleLanguage(langName) {
+        let lower = langName.toLowerCase();
+        if (lower === "automatic") {
+            // Exclusive toggle: turns on Automatic (clearing all others), or toggles back to English
+            setDraft("languages", isAutoLanguage() ? "English" : "Automatic");
+            return;
+        }
+        // When Automatic is active, other languages cannot be selected until Automatic is unchecked
+        if (isAutoLanguage()) return;
+
+        let list = parseLanguageList();
+        let next = [];
+        let removed = false;
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].toLowerCase() === lower) {
+                removed = true;
+            } else {
+                next.push(list[i]);
+            }
+        }
+        if (!removed) {
+            next.push(langName);
+        }
+        if (next.length === 0) {
+            next.push("English");
+        }
+        let formatted = next.length === 1
+            ? next[0]
+            : (next.length === 2 ? (next[0] + " and " + next[1]) : next.join(", "));
+        setDraft("languages", formatted);
+    }
+
     function saveDraft(forceRestart) {
         backend.saveAllSettings(JSON.stringify(draft), draftApiKey, Boolean(forceRestart));
         dirty = false;
@@ -384,7 +443,9 @@ ApplicationWindow {
     }
 
     component KInput: TextField {
-        color: win.cText
+        id: kinp
+        property string boundText: ""
+        color: enabled ? win.cText : win.cMuted
         placeholderTextColor: win.cMuted
         font.pixelSize: 13
         leftPadding: 12
@@ -392,6 +453,15 @@ ApplicationWindow {
         topPadding: 9
         bottomPadding: 9
         selectByMouse: true
+        opacity: enabled ? 1.0 : 0.6
+        onBoundTextChanged: {
+            if (!activeFocus && text !== boundText) {
+                text = boundText;
+            }
+        }
+        Component.onCompleted: {
+            if (boundText !== "") text = boundText;
+        }
         background: Rectangle {
             radius: 10
             color: win.cMantle
@@ -533,7 +603,13 @@ ApplicationWindow {
 
                 TextArea {
                     id: customArea
-                    text: win.getDraft("custom_instructions", "")
+                    property string boundPrompt: String(win.getDraft("custom_instructions", "") || "")
+                    onBoundPromptChanged: {
+                        if (!activeFocus && text !== boundPrompt) {
+                            text = boundPrompt;
+                        }
+                    }
+                    Component.onCompleted: text = boundPrompt
                     placeholderText: cpe.isCustomMode
                         ? "Example: 'Be blunt, witty, and direct. Keep every reply short and punchy, and tease me when I ask obvious questions.'"
                         : "Optional extra instructions (e.g. 'Call me Alex', 'Keep answers under 10 words')..."
@@ -544,7 +620,7 @@ ApplicationWindow {
                     selectByMouse: true
                     padding: 10
                     onTextChanged: {
-                        if (text !== win.getDraft("custom_instructions", "")) {
+                        if (activeFocus && text !== win.getDraft("custom_instructions", "")) {
                             win.setDraft("custom_instructions", text);
                         }
                     }
@@ -926,6 +1002,103 @@ ApplicationWindow {
                                         }
                                     }
 
+                                    // Spoken Language Picker (Default: English; Automatic is exclusive!)
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: langCardCol.implicitHeight + 24
+                                        radius: 12
+                                        color: win.cMantle
+                                        border.width: 1
+                                        border.color: win.isAutoLanguage() ? Qt.rgba(0.45, 0.78, 0.93, 0.45) : win.cSurface0
+                                        Behavior on border.color { ColorAnimation { duration: 180 } }
+
+                                        ColumnLayout {
+                                            id: langCardCol
+                                            anchors.fill: parent
+                                            anchors.margins: 14
+                                            spacing: 10
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                Text { text: "Your Language(s)"; color: win.cText; font.pixelSize: 13; font.bold: true }
+                                                KBadge {
+                                                    label: win.isAutoLanguage() ? "Automatic Mode" : "Default: English"
+                                                    badgeColor: win.isAutoLanguage() ? win.cCyan : win.cMauve
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                                Text {
+                                                    text: win.isAutoLanguage()
+                                                        ? "Unselect Automatic to pick specific languages"
+                                                        : "Tap to toggle or type your own"
+                                                    color: win.cMuted
+                                                    font.pixelSize: 11
+                                                }
+                                            }
+
+                                            Flow {
+                                                Layout.fillWidth: true
+                                                spacing: 6
+                                                Repeater {
+                                                    model: ["Automatic", "English", "Vietnamese", "Spanish", "Japanese", "Korean", "Chinese", "French", "German", "Portuguese", "Hindi", "Russian"]
+                                                    delegate: Rectangle {
+                                                        readonly property bool isAutoChip: modelData === "Automatic"
+                                                        readonly property bool active: win.hasLanguage(modelData)
+                                                        readonly property bool lockedOut: !isAutoChip && win.isAutoLanguage()
+                                                        implicitWidth: lChipTxt.implicitWidth + 18
+                                                        implicitHeight: 28
+                                                        radius: 14
+                                                        opacity: lockedOut ? 0.34 : 1.0
+                                                        scale: (!lockedOut && lChipMa.pressed) ? 0.94 : ((!lockedOut && lChipMa.containsMouse) ? 1.04 : 1.0)
+                                                        color: {
+                                                            if (isAutoChip && active) return Qt.rgba(0.45, 0.78, 0.93, 0.24);
+                                                            if (active) return Qt.rgba(0.80, 0.65, 0.97, 0.22);
+                                                            return (!lockedOut && lChipMa.containsMouse) ? win.cSurface0 : win.cBase;
+                                                        }
+                                                        border.width: 1
+                                                        border.color: {
+                                                            if (isAutoChip && active) return win.cCyan;
+                                                            if (active) return win.cMauve;
+                                                            return (!lockedOut && lChipMa.containsMouse) ? win.cOverlay : win.cSurface1;
+                                                        }
+
+                                                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                                                        Behavior on color { ColorAnimation { duration: 130 } }
+                                                        Behavior on border.color { ColorAnimation { duration: 130 } }
+                                                        Behavior on scale { NumberAnimation { duration: 110; easing.type: Easing.OutCubic } }
+
+                                                        Text {
+                                                            id: lChipTxt
+                                                            anchors.centerIn: parent
+                                                            text: (isAutoChip ? (active ? "✦ " : "") : (active ? "✓ " : "")) + modelData
+                                                            color: (isAutoChip && active) ? win.cCyan : (active ? win.cMauve : win.cSubtext)
+                                                            font.pixelSize: 11
+                                                            font.weight: active ? Font.Bold : Font.Medium
+                                                        }
+
+                                                        MouseArea {
+                                                            id: lChipMa
+                                                            anchors.fill: parent
+                                                            enabled: !lockedOut
+                                                            hoverEnabled: true
+                                                            cursorShape: lockedOut ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                                            onClicked: win.toggleLanguage(modelData)
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            KInput {
+                                                Layout.fillWidth: true
+                                                enabled: !win.isAutoLanguage()
+                                                placeholderText: win.isAutoLanguage()
+                                                    ? "Automatic — detects & replies in whatever language you speak"
+                                                    : "Type any language(s) (e.g. English, or English and Tagalog)..."
+                                                boundText: win.isAutoLanguage() ? "Automatic (auto-detects spoken language)" : String(win.getDraft("languages", "English") || "")
+                                                onTextEdited: if (!win.isAutoLanguage()) win.setDraft("languages", text)
+                                            }
+                                        }
+                                    }
+
                                     // Live System Readiness
                                     Rectangle {
                                         Layout.fillWidth: true
@@ -1024,10 +1197,11 @@ ApplicationWindow {
                                                     Layout.fillWidth: true
                                                     placeholderText: "Paste your GEMINI_API_KEY here (e.g. AIza... or AQ....)"
                                                     echoMode: win.revealApiKey ? TextInput.Normal : TextInput.Password
-                                                    text: win.draftApiKey
+                                                    boundText: win.draftApiKey
                                                     onTextEdited: {
                                                         win.draftApiKey = text;
                                                         win.dirty = true;
+                                                        backend.clearApiTest();
                                                     }
                                                 }
                                                 KButton {
@@ -1206,10 +1380,22 @@ ApplicationWindow {
                                             Layout.fillWidth: true
                                             spacing: 4
                                             Text { text: "Languages"; color: win.cText; font.pixelSize: 12; font.bold: true }
-                                            KInput {
+                                            RowLayout {
                                                 Layout.fillWidth: true
-                                                text: win.getDraft("languages", "English and Vietnamese")
-                                                onTextEdited: win.setDraft("languages", text)
+                                                spacing: 8
+                                                KInput {
+                                                    Layout.fillWidth: true
+                                                    enabled: !win.isAutoLanguage()
+                                                    placeholderText: "e.g. English"
+                                                    boundText: win.isAutoLanguage() ? "Automatic" : String(win.getDraft("languages", "English") || "")
+                                                    onTextEdited: if (!win.isAutoLanguage()) win.setDraft("languages", text)
+                                                }
+                                                KButton {
+                                                    text: win.isAutoLanguage() ? "✦ Auto ON" : "Auto"
+                                                    primary: win.isAutoLanguage()
+                                                    hPad: 12
+                                                    onClicked: win.toggleLanguage("Automatic")
+                                                }
                                             }
                                         }
                                         ColumnLayout {
@@ -1397,7 +1583,7 @@ ApplicationWindow {
                                         Text { text: "Wake Words (comma-separated)"; color: win.cText; font.pixelSize: 13; font.bold: true }
                                         KInput {
                                             Layout.fillWidth: true
-                                            text: win.getDraft("wake_words", "kale,kael,hey kale,hey kael")
+                                            boundText: String(win.getDraft("wake_words", "kale,kael,hey kale,hey kael") || "")
                                             onTextEdited: win.setDraft("wake_words", text)
                                         }
                                         Text { text: "Tip: Include phonetic spellings like 'kale' alongside 'kael' for super snappy offline detection."; color: win.cMuted; font.pixelSize: 11 }
@@ -1930,10 +2116,11 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                                 placeholderText: "Enter your GEMINI_API_KEY"
                                                 echoMode: win.revealApiKey ? TextInput.Normal : TextInput.Password
-                                                text: win.draftApiKey
+                                                boundText: win.draftApiKey
                                                 onTextEdited: {
                                                     win.draftApiKey = text;
                                                     win.dirty = true;
+                                                    backend.clearApiTest();
                                                 }
                                             }
                                             KButton { text: win.revealApiKey ? "Hide" : "Show"; onClicked: win.revealApiKey = !win.revealApiKey }
@@ -2132,7 +2319,7 @@ ApplicationWindow {
                                                 Text { text: "Assistant Name"; color: win.cSubtext; font.pixelSize: 12 }
                                                 KInput {
                                                     Layout.fillWidth: true
-                                                    text: win.getDraft("assistant_name", "Kael")
+                                                    boundText: String(win.getDraft("assistant_name", "Kael") || "")
                                                     onTextEdited: win.setDraft("assistant_name", text)
                                                 }
                                             }
@@ -2140,10 +2327,22 @@ ApplicationWindow {
                                                 Layout.fillWidth: true
                                                 spacing: 4
                                                 Text { text: "Spoken Languages"; color: win.cSubtext; font.pixelSize: 12 }
-                                                KInput {
+                                                RowLayout {
                                                     Layout.fillWidth: true
-                                                    text: win.getDraft("languages", "English and Vietnamese")
-                                                    onTextEdited: win.setDraft("languages", text)
+                                                    spacing: 8
+                                                    KInput {
+                                                        Layout.fillWidth: true
+                                                        enabled: !win.isAutoLanguage()
+                                                        placeholderText: "e.g. English"
+                                                        boundText: win.isAutoLanguage() ? "Automatic" : String(win.getDraft("languages", "English") || "")
+                                                        onTextEdited: if (!win.isAutoLanguage()) win.setDraft("languages", text)
+                                                    }
+                                                    KButton {
+                                                        text: win.isAutoLanguage() ? "✦ Auto ON" : "Auto"
+                                                        primary: win.isAutoLanguage()
+                                                        hPad: 12
+                                                        onClicked: win.toggleLanguage("Automatic")
+                                                    }
                                                 }
                                             }
                                         }
@@ -2392,7 +2591,7 @@ ApplicationWindow {
                                             Text { text: "Wake Phrases (comma-separated)"; color: win.cSubtext; font.pixelSize: 12 }
                                             KInput {
                                                 Layout.fillWidth: true
-                                                text: win.getDraft("wake_words", "kale,kael,hey kale,hey kael")
+                                                boundText: String(win.getDraft("wake_words", "kale,kael,hey kale,hey kael") || "")
                                                 onTextEdited: win.setDraft("wake_words", text)
                                             }
                                             Text { text: "Changing wake words automatically restarts kael.service when you click Save & Apply."; color: win.cMuted; font.pixelSize: 11 }
@@ -2839,7 +3038,7 @@ ApplicationWindow {
 
                                         RowLayout {
                                             Layout.fillWidth: true
-                                            Text { text: "Connect with " + backend.appMeta.maintainer; color: win.cText; font.pixelSize: 14; font.bold: true; Layout.fillWidth: true }
+                                            Text { text: "Connect with Bongoo"; color: win.cText; font.pixelSize: 14; font.bold: true; Layout.fillWidth: true }
                                             Text { text: "Click any icon to open"; color: win.cMuted; font.pixelSize: 11 }
                                         }
 
