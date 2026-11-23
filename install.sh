@@ -86,6 +86,19 @@ else
       err "Clone the repo first and run ./install.sh inside it."
       exit 1
     fi
+    if ! command -v git >/dev/null 2>&1; then
+      warn "git is not installed — installing git first..."
+      if command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update -qq && sudo apt-get install -y git
+      elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm git
+      elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y git
+      else
+        err "Please install git first, then re-run this installer."
+        exit 1
+      fi
+    fi
     info "Cloning Kael into $INSTALL_DIR..."
     git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   fi
@@ -129,19 +142,24 @@ install_system_deps() {
       warn "Could not install ffmpeg automatically (optional: needed for screen vision)."
 
   elif command -v apt-get >/dev/null 2>&1; then
-    info "Installing Debian/Ubuntu dependencies via apt..."
+    info "Installing Debian/Ubuntu/Kubuntu dependencies via apt..."
     sudo apt-get update -qq
     sudo apt-get install -y \
       python3 python3-venv python3-pip python3-gi python3-gi-cairo \
-      gir1.2-gtk-4.0 libgtk-4-1 pulseaudio-utils ffmpeg libnotify-bin \
-      playerctl brightnessctl wl-clipboard xclip libxcb-cursor0 grim curl unzip
-    # Best-effort Qt6 QML + gtk4-layer-shell (package names vary slightly across Ubuntu/Debian releases)
-    sudo apt-get install -y \
-      python3-pyqt6 qml6-module-qtquick qml6-module-qtquick-controls \
-      qml6-module-qtquick-layouts qt6-wayland 2>/dev/null || \
-      warn "System PyQt6/QML packages unavailable — will install PyQt6 inside .venv instead."
-    sudo apt-get install -y libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0 2>/dev/null || \
-      warn "gtk4-layer-shell not available in apt repos; HUD will use standard Wayland/X11 fallback."
+      gir1.2-gtk-4.0 gir1.2-gdkpixbuf-2.0 libgtk-4-1 pulseaudio-utils \
+      ffmpeg libnotify-bin playerctl brightnessctl wl-clipboard xclip \
+      libxcb-cursor0 curl unzip
+    # Install desktop/QML/layer-shell extras individually so one renamed package on older releases never blocks the rest
+    for pkg in \
+      grim spectacle \
+      python3-pyqt6 python3-pyqt6.qtquick \
+      qml6-module-qtquick qml6-module-qtquick-controls \
+      qml6-module-qtquick-layouts qml6-module-qtquick-templates \
+      qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+      qt6-wayland libqt6svg6 \
+      libgtk4-layer-shell0 gir1.2-gtk4layershell-1.0; do
+      sudo apt-get install -y "$pkg" 2>/dev/null || true
+    done
 
   elif command -v zypper >/dev/null 2>&1; then
     info "Installing openSUSE dependencies via zypper..."
@@ -174,10 +192,18 @@ info "Installing Python dependencies from requirements.txt..."
 "$VENV_DIR/bin/pip" install --upgrade pip -q
 "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
 
-# Ensure PyQt6 is importable inside .venv (fallback to pip wheel if system package wasn't installed)
-if ! "$VENV_DIR/bin/python" -c "from PyQt6 import QtQml, QtQuick" 2>/dev/null; then
-  info "Installing PyQt6 wheel into .venv for the QML Settings app..."
-  "$VENV_DIR/bin/pip" install "PyQt6>=6.6.0" -q
+# Verify PyQt6 + QtQuick.Controls + Layouts actually load (fallback to self-contained PyQt6 pip wheel if distro QML modules are incomplete)
+if ! QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic "$VENV_DIR/bin/python" -c '
+import sys
+from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtQml import QQmlApplicationEngine
+app = QGuiApplication(sys.argv)
+eng = QQmlApplicationEngine()
+eng.loadData(b"import QtQuick\nimport QtQuick.Controls\nimport QtQuick.Layouts\nApplicationWindow { visible: false }")
+assert len(eng.rootObjects()) == 1
+' 2>/dev/null; then
+  info "Installing self-contained PyQt6 wheel into .venv for the QML Settings app..."
+  "$VENV_DIR/bin/pip" install --upgrade "PyQt6>=6.6.0" -q
 fi
 ok "Python dependencies ready."
 
