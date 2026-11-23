@@ -155,31 +155,50 @@ def _get_system_status() -> dict[str, Any]:
 
 def _control_volume(action: str, level: int | None = None) -> dict[str, Any]:
     action = action.lower().strip()
+    use_wpctl = bool(shutil.which("wpctl"))
+    if not use_wpctl and not shutil.which("pactl"):
+        return {"ok": False, "error": "Neither wpctl nor pactl is available."}
+
     if action == "get":
-        code, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        if use_wpctl:
+            code, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        else:
+            code, out = _run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"])
         return {"ok": code == 0, "result": out}
     if action == "mute":
-        code, _ = _run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1"])
+        cmd = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1"] if use_wpctl else ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1"]
+        code, _ = _run(cmd)
         return {"ok": code == 0, "result": "Audio muted"}
     if action == "unmute":
-        code, _ = _run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"])
+        cmd = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "0"] if use_wpctl else ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"]
+        code, _ = _run(cmd)
         return {"ok": code == 0, "result": "Audio unmuted"}
     if action == "toggle":
-        code, _ = _run(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+        cmd = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"] if use_wpctl else ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]
+        code, _ = _run(cmd)
         return {"ok": code == 0, "result": "Toggled mute"}
     if action == "up":
         step = max(1, min(50, level or 10))
-        code, _ = _run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{step}%+"])
-        _, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        if use_wpctl:
+            code, _ = _run(["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", f"{step}%+"])
+            _, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        else:
+            code, _ = _run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"+{step}%"])
+            _, out = _run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"])
         return {"ok": code == 0, "result": out}
     if action == "down":
         step = max(1, min(50, level or 10))
-        code, _ = _run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{step}%-"])
-        _, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        if use_wpctl:
+            code, _ = _run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{step}%-"])
+            _, out = _run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        else:
+            code, _ = _run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"-{step}%"])
+            _, out = _run(["pactl", "get-sink-volume", "@DEFAULT_SINK@"])
         return {"ok": code == 0, "result": out}
     if action == "set" and level is not None:
         clamped = max(0, min(100, int(level)))
-        code, _ = _run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{clamped}%"])
+        cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{clamped}%"] if use_wpctl else ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{clamped}%"]
+        code, _ = _run(cmd)
         return {"ok": code == 0, "result": f"Volume set to {clamped}%"}
     return {"ok": False, "error": f"Unsupported volume action: {action}"}
 

@@ -134,7 +134,7 @@ install_system_deps() {
     sudo apt-get install -y \
       python3 python3-venv python3-pip python3-gi python3-gi-cairo \
       gir1.2-gtk-4.0 libgtk-4-1 pulseaudio-utils ffmpeg libnotify-bin \
-      playerctl brightnessctl wl-clipboard grim curl unzip
+      playerctl brightnessctl wl-clipboard xclip libxcb-cursor0 grim curl unzip
     # Best-effort Qt6 QML + gtk4-layer-shell (package names vary slightly across Ubuntu/Debian releases)
     sudo apt-get install -y \
       python3-pyqt6 qml6-module-qtquick qml6-module-qtquick-controls \
