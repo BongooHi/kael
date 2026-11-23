@@ -350,8 +350,8 @@ def _open_url(url: str) -> dict[str, Any]:
 
 
 def _hyprland_control(action: str, target: str | None = None) -> dict[str, Any]:
-    if not shutil.which("hyprctl"):
-        return {"ok": False, "error": "hyprctl is not available."}
+    if not shutil.which("hyprctl") or not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return {"ok": False, "error": "Hyprland is not the active desktop session."}
     action = action.lower().strip()
     if action == "list_windows":
         code, out = _run(["hyprctl", "clients", "-j"])
@@ -401,16 +401,37 @@ def _hyprland_control(action: str, target: str | None = None) -> dict[str, Any]:
 
 
 def _capture_png_to(out_path: Path, timeout: float = 6.0) -> tuple[int, str]:
-    """Capture screen to PNG across Wayland (grim/spectacle/gnome-screenshot) and X11 (scrot)."""
-    if shutil.which("grim"):
-        return _run(["grim", str(out_path)], timeout=timeout)
-    if shutil.which("spectacle"):
-        return _run(["spectacle", "-b", "-n", "-o", str(out_path)], timeout=timeout)
-    if shutil.which("gnome-screenshot"):
-        return _run(["gnome-screenshot", "-f", str(out_path)], timeout=timeout)
-    if shutil.which("scrot"):
-        return _run(["scrot", str(out_path)], timeout=timeout)
-    return 127, "No screenshot tool found (install grim, spectacle, gnome-screenshot, or scrot)."
+    """Capture screen to PNG across KDE Plasma, Hyprland/Sway, GNOME, and X11 with fallback."""
+    desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+    if "kde" in desktop or "plasma" in desktop:
+        candidates = [
+            ("spectacle", ["spectacle", "-b", "-n", "-o", str(out_path)]),
+            ("grim", ["grim", str(out_path)]),
+            ("scrot", ["scrot", str(out_path)]),
+        ]
+    elif "gnome" in desktop:
+        candidates = [
+            ("gnome-screenshot", ["gnome-screenshot", "-f", str(out_path)]),
+            ("grim", ["grim", str(out_path)]),
+            ("scrot", ["scrot", str(out_path)]),
+        ]
+    else:
+        candidates = [
+            ("grim", ["grim", str(out_path)]),
+            ("spectacle", ["spectacle", "-b", "-n", "-o", str(out_path)]),
+            ("gnome-screenshot", ["gnome-screenshot", "-f", str(out_path)]),
+            ("scrot", ["scrot", str(out_path)]),
+        ]
+
+    last_err = "No screenshot tool found (install grim, spectacle, gnome-screenshot, or scrot)."
+    for binary, cmd in candidates:
+        if not shutil.which(binary):
+            continue
+        code, out = _run(cmd, timeout=timeout)
+        if code == 0 and out_path.exists() and out_path.stat().st_size > 0:
+            return 0, out
+        last_err = out or f"{binary} failed with exit code {code}"
+    return 1, last_err
 
 
 def _clipboard(action: str, text: str = "") -> dict[str, Any]:
@@ -604,21 +625,36 @@ _BLOCKED_CMD_PATTERNS = [
 ]
 
 
+def _find_terminal() -> str | None:
+    """Find an installed terminal emulator across Hyprland, KDE Plasma, GNOME, and Sway."""
+    desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+    order = (
+        ("konsole", "kitty", "ghostty", "alacritty", "wezterm", "foot")
+        if ("kde" in desktop or "plasma" in desktop)
+        else ("kitty", "ghostty", "alacritty", "konsole", "gnome-terminal", "foot", "wezterm")
+    )
+    for name in order:
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
 def _run_in_terminal(command: str) -> dict[str, Any]:
-    """Open a Kitty terminal window and visibly run a safe command for the user."""
+    """Open a terminal window and visibly run a safe command for the user."""
     cmd = command.strip()
     if not cmd:
         return {"ok": False, "error": "Empty command."}
     for pat in _BLOCKED_CMD_PATTERNS:
         if re.search(pat, cmd, re.IGNORECASE):
             return {"ok": False, "error": f"Blocked unsafe command: {cmd}"}
-    term = shutil.which("kitty") or shutil.which("ghostty") or shutil.which("alacritty")
+    term = _find_terminal()
     if not term:
         return {"ok": False, "error": "No terminal emulator found."}
     # Run command visibly and drop into an interactive shell afterward so the output stays on screen
     shell_line = f"{cmd}; exec ${{SHELL:-bash}}"
     _launch_detached([term, "-e", "bash", "-lc", shell_line])
-    return {"ok": True, "result": f"Opened kitty and ran: {cmd}"}
+    return {"ok": True, "result": f"Opened {Path(term).name} and ran: {cmd}"}
 
 
 def _run_shell_command(command: str) -> dict[str, Any]:
@@ -851,7 +887,7 @@ def _manage_packages(action: str, package: str = "") -> dict[str, Any]:
             else f"yay -S {shlex.quote(pkg)}"
         )
         shell_line = f"echo '>>> Kael installing {pkg}...'; {install_cmd}; echo; read -rp 'Done! Press Enter to close...'"
-        term = shutil.which("kitty") or shutil.which("ghostty") or shutil.which("alacritty")
+        term = _find_terminal()
         if not term:
             return {"ok": False, "error": "No terminal found to run interactive installer."}
         _launch_detached([term, "-e", "bash", "-lc", shell_line])
@@ -865,7 +901,7 @@ def _manage_packages(action: str, package: str = "") -> dict[str, Any]:
         if code != 0:
             return {"ok": False, "error": f"Package '{pkg}' is not installed."}
         shell_line = f"echo '>>> Kael removing {pkg}...'; sudo pacman -Rns {shlex.quote(pkg)}; echo; read -rp 'Done! Press Enter to close...'"
-        term = shutil.which("kitty") or shutil.which("ghostty") or shutil.which("alacritty")
+        term = _find_terminal()
         if not term:
             return {"ok": False, "error": "No terminal found."}
         _launch_detached([term, "-e", "bash", "-lc", shell_line])

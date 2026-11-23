@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="Kael 1.0 — Always-Listening Linux AI Voice Assistant" width="100%" />
+  <img src="assets/banner.svg?v=2" alt="Kael 1.0 — Always-Listening Linux AI Voice Assistant" width="100%" />
 </p>
 
 <p align="center">
