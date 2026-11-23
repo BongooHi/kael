@@ -1,0 +1,20 @@
+# Secrets (NEVER commit your API key!)
+.env
+
+# Python virtual environment & bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Downloaded offline Vosk wake-word models (~40-70 MB)
+models/
+
+# Logs, caches & local backups
+*.log
+*.bak
+.DS_Store
+.idea/
+.vscode/

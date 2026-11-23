@@ -1,0 +1,7 @@
+google-genai>=2.3.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+scipy>=1.11.0
+requests>=2.31.0
+vosk>=0.3.45
+PyOpenGL>=3.1.7
