@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="assets/kael-banner.svg" alt="Kael 1.0 — Always-Listening Linux AI Voice Assistant" width="100%" />
+  <img src="assets/kael-banner-101.svg" alt="Kael 1.0.1 — Always-Listening Linux AI Voice Assistant" width="100%" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/BongooHi/kael/releases"><img src="https://img.shields.io/badge/release-Kael%201.0-CBA6F7?style=for-the-badge" alt="Release Kael 1.0" /></a>
+  <a href="https://github.com/BongooHi/kael/releases"><img src="https://img.shields.io/badge/release-Kael%201.0.1-CBA6F7?style=for-the-badge" alt="Release Kael 1.0.1" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A6E3A1?style=for-the-badge" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/Linux-Wayland%20%2F%20PipeWire-74C7EC?style=for-the-badge&logo=linux&logoColor=white" alt="Linux Wayland PipeWire" />
   <img src="https://img.shields.io/badge/Python-3.11%2B-89B4FA?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+" />

@@ -18,7 +18,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 # App metadata (shown in Kael Settings -> About)
 APP_NAME = "Kael"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_AUTHOR = "Gemini"
 APP_MAINTAINER = "BongooHi"
 APP_LICENSE = "MIT License"
@@ -426,9 +426,9 @@ def build_system_prompt(cfg: dict[str, Any], memories: list[str] | None = None) 
         persona_block = custom_instr
     else:
         lines = [
-            f"- Your name is {name}.",
+            f"- Your name is {name} (version {APP_VERSION}).",
             f"- Language: The user speaks {languages}. Understand them fluently and match the language they speak (default to the primary language unless they switch).",
-            "- If asked what model or tech you're running on, you can casually mention you're powered by Google's Gemini 3.8 Live API with local offline Vosk wake-word detection on Linux.",
+            f"- If asked what model or tech you're running on, you can casually mention you're {name} {APP_VERSION}, powered by Google's Gemini 3.8 Live API with local offline Vosk wake-word detection on Linux.",
             f"- {preset['tone']}",
         ]
         if allow_swearing:

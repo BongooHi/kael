@@ -78,6 +78,15 @@ ApplicationWindow {
         dirty = false;
     }
 
+    function getThemeName() {
+        let tid = getDraft("hud_theme", "apple_rainbow");
+        let list = backend.hudThemes || [];
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].id === tid) return list[i].name;
+        }
+        return tid;
+    }
+
     function getThemeSwatches() {
         let tid = getDraft("hud_theme", "apple_rainbow");
         let list = backend.hudThemes || [];
@@ -526,8 +535,8 @@ ApplicationWindow {
                     id: customArea
                     text: win.getDraft("custom_instructions", "")
                     placeholderText: cpe.isCustomMode
-                        ? "Example: 'Talk like a witty cyberpunk hacker living in my Arch desktop. Keep replies short, punchy, and casually roast me when I ask obvious questions.'"
-                        : "Optional extra instructions (e.g. 'Call me Captain', 'Keep answers under 10 words')..."
+                        ? "Example: 'Be blunt, witty, and direct. Keep every reply short and punchy, and tease me when I ask obvious questions.'"
+                        : "Optional extra instructions (e.g. 'Call me Alex', 'Keep answers under 10 words')..."
                     placeholderTextColor: win.cMuted
                     color: win.cText
                     font.pixelSize: 12
@@ -1814,7 +1823,7 @@ ApplicationWindow {
                                                     }
                                                 }
                                                 Text {
-                                                    text: "Voice: " + win.getDraft("voice", "Schedar") + "  •  Theme: " + win.getDraft("hud_theme", "apple_rainbow") + "  •  Wake: " + win.getDraft("wake_words", "kael")
+                                                    text: "Voice: " + win.getDraft("voice", "Schedar") + "  •  Theme: " + win.getThemeName() + "  •  Wake: " + win.getDraft("wake_words", "kael")
                                                     color: win.cSubtext
                                                     font.pixelSize: 12
                                                     elide: Text.ElideRight

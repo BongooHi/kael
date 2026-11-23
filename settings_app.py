@@ -60,8 +60,8 @@ EXAMPLE_PERSONALITY_SNIPPETS: list[dict[str, str]] = [
         "text": "Reply with dry sarcasm and light playful teasing, never overly polite.",
     },
     {
-        "label": "+ Cyberpunk netrunner",
-        "text": "Talk like a calm cyberpunk netrunner living inside my Arch Linux terminal.",
+        "label": "+ Brutally honest",
+        "text": "Be brutally honest and direct — no sugarcoating, just say it straight.",
     },
     {
         "label": "+ Ultra-short replies",

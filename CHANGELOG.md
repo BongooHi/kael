@@ -1,5 +1,14 @@
 # Changelog
 
+## Kael 1.0.1 (`v1.0.1`) — Patch Release
+
+### Fixes & Improvements
+- **Resilient Screen Vision Fallback:** Expanded `see_screen` automatic model fallback (`gemini-3.1-flash-lite` → `gemini-3.5-flash-lite` → `gemini-3.8-flash` → `gemini-3.6-flash`) so temporary `503 UNAVAILABLE` demand spikes recover seamlessly.
+- **KDE Plasma & Kubuntu Compatibility:** Prioritized `spectacle` for screenshots/vision and `konsole` for terminal commands on KDE Plasma, added `pactl` fallback for volume control, guarded `hyprctl` behind `HYPRLAND_INSTANCE_SIGNATURE`, and hardened `apt` + Qt6 QML verification in `install.sh`.
+- **Settings & Polish:** Overview now displays friendly theme names, Kael is aware of his own version (`1.0.1`), and custom personality starter options were refined.
+
+---
+
 ## Kael 1.0 (`v1.0.0`) — Initial Public Release
 
 ### Highlights

@@ -808,11 +808,12 @@ def _analyze_screen(question: str = "") -> dict[str, Any]:
 
     client = _get_vision_client(api_key)
     img_part = types.Part.from_bytes(data=jpg, mime_type="image/jpeg")
-    # Retry transient 503/500 spikes and fall back cleanly if flash-lite is saturated
+    # Multi-model fallback across flash-lite / flash pools so 503 traffic spikes recover automatically
     attempts = [
         ("gemini-3.1-flash-lite", 0.0),
-        ("gemini-3.1-flash-lite", 0.6),
-        ("gemini-3.8-flash", 0.4),
+        ("gemini-3.5-flash-lite", 0.25),
+        ("gemini-3.8-flash", 0.3),
+        ("gemini-3.6-flash", 0.3),
     ]
     last_exc: Exception | None = None
     for model_id, delay in attempts:
@@ -822,6 +823,7 @@ def _analyze_screen(question: str = "") -> dict[str, Any]:
             resp = client.models.generate_content(
                 model=model_id,
                 contents=[img_part, prompt],
+                config=types.GenerateContentConfig(max_output_tokens=260),
             )
             desc = (resp.text or "").strip()
             return {
