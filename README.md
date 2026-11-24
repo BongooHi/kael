@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="#-demo">Demo</a> •
   <a href="#-features">Features</a> •
   <a href="#-quick-install">Quick Install</a> •
   <a href="#-architecture">Architecture</a> •
@@ -25,6 +26,14 @@
 
 > [!NOTE]
 > This project is completely made by AI, only maintained by a human so this project is expected to get frequently updated and Kael will forever be free. Any feedback is welcome!
+
+---
+
+## 🎬 Demo
+
+https://github.com/user-attachments/assets/ac836aa4-a4a1-4b77-a549-70d57852e9be
+
+*a bit janky of an video.*
 
 ---
 
